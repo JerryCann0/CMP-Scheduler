@@ -1,0 +1,299 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Segoe UI", Consolas, monospace;
+  font-size: 13px;
+  color: #000;
+  background: #fff;
+  padding: 8px;
+}
+
+h1 {
+  font-size: 14px;
+  font-weight: 600;
+  border-bottom: 1px solid #999;
+  padding-bottom: 4px;
+  margin-bottom: 8px;
+}
+
+h2 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 12px 0 4px 0;
+}
+
+/* Form layout */
+.form-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.form-field label {
+  display: block;
+  font-size: 11px;
+  color: #444;
+  margin-bottom: 1px;
+}
+
+input, select {
+  font-family: inherit;
+  font-size: 13px;
+  border: 1px solid #999;
+  padding: 2px 4px;
+  background: #fff;
+}
+
+input:focus, select:focus {
+  outline: 1px solid #000;
+}
+
+input[type="number"] {
+  width: 60px;
+}
+
+input[type="text"] {
+  width: 160px;
+}
+
+select {
+  min-width: 140px;
+  height: 80px;
+}
+
+button {
+  font-family: inherit;
+  font-size: 12px;
+  border: 1px solid #999;
+  background: #e8e8e8;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #d0d0d0;
+}
+
+button:active {
+  background: #bbb;
+}
+
+/* Table */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+th, td {
+  border: 1px solid #999;
+  padding: 2px 6px;
+  text-align: left;
+}
+
+th {
+  background: #e8e8e8;
+  font-weight: 600;
+}
+
+tr:nth-child(even) {
+  background: #f6f6f6;
+}
+
+tr.critical {
+  background: #ffe0e0;
+}
+
+/* Actual duration input in table */
+td input[type="number"] {
+  border: 1px solid #bbb;
+  width: 50px;
+  font-size: 12px;
+}
+
+/* Actions */
+.actions {
+  margin: 8px 0;
+  display: flex;
+  gap: 6px;
+}
+
+/* Status bar */
+.status-bar {
+  border-top: 1px solid #999;
+  padding-top: 4px;
+  margin-top: 12px;
+  font-size: 11px;
+  color: #444;
+}
+
+.status-bar span {
+  margin-right: 16px;
+}
+
+/* Delete button */
+button.delete-btn {
+  font-size: 11px;
+  padding: 1px 6px;
+  color: #666;
+  border-color: #bbb;
+}
+
+/* No tasks message */
+.empty-msg {
+  color: #888;
+  font-style: italic;
+  padding: 8px 0;
+  font-size: 12px;
+}
+
+/* ── Gantt Chart ─────────────────────────────────────────────────── */
+.gantt-container {
+  border: 1px solid #999;
+  margin-top: 6px;
+  overflow-x: auto;
+  min-height: 30px;
+}
+
+.gantt-chart {
+  display: table;
+  border-collapse: collapse;
+  min-width: 100%;
+}
+
+/* Header row with time units */
+.gantt-header {
+  display: flex;
+  border-bottom: 1px solid #999;
+  background: #e8e8e8;
+}
+
+.gantt-label-header {
+  min-width: 110px;
+  max-width: 110px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  border-right: 1px solid #999;
+  flex-shrink: 0;
+}
+
+.gantt-time-headers {
+  display: flex;
+  flex: 1;
+}
+
+.gantt-time-cell {
+  width: 28px;
+  min-width: 28px;
+  text-align: center;
+  font-size: 10px;
+  color: #666;
+  border-right: 1px solid #ddd;
+  padding: 2px 0;
+}
+
+/* Task rows */
+.gantt-row {
+  display: flex;
+  border-bottom: 1px solid #ddd;
+  height: 22px;
+}
+
+.gantt-row:last-child {
+  border-bottom: none;
+}
+
+.gantt-row-label {
+  min-width: 110px;
+  max-width: 110px;
+  padding: 2px 6px;
+  font-size: 11px;
+  border-right: 1px solid #999;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 18px;
+  flex-shrink: 0;
+}
+
+.gantt-row-bars {
+  position: relative;
+  display: flex;
+  flex: 1;
+}
+
+.gantt-grid-cell {
+  width: 28px;
+  min-width: 28px;
+  border-right: 1px solid #f0f0f0;
+}
+
+/* Bars */
+.gantt-bar {
+  position: absolute;
+  height: 10px;
+  top: 2px;
+  border: 1px solid #666;
+  background: #bbb;
+}
+
+.gantt-bar.planned {
+  background: #bbb;
+  border-color: #888;
+}
+
+.gantt-bar.critical {
+  background: #e8a0a0;
+  border-color: #c06060;
+}
+
+.gantt-bar.actual {
+  top: 12px;
+  height: 7px;
+  background: #8cb8e0;
+  border-color: #5080a8;
+}
+
+/* Legend */
+.gantt-legend {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #444;
+  display: flex;
+  gap: 12px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 8px;
+  border: 1px solid #888;
+}
+
+.legend-planned {
+  background: #bbb;
+}
+
+.legend-actual {
+  background: #8cb8e0;
+  border-color: #5080a8;
+}
+
+.legend-critical {
+  background: #e8a0a0;
+  border-color: #c06060;
+}

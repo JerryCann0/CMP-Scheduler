@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CPM Scheduler</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <h1>CPM Schedule — Construction Project</h1>
+
+  <!-- Add Task Form -->
+  <h2>Add Task</h2>
+  <div class="form-row">
+    <div class="form-field">
+      <label for="task-name">Task Name</label>
+      <input type="text" id="task-name" placeholder="e.g. Foundation">
+    </div>
+    <div class="form-field">
+      <label for="planned-dur">Planned Duration</label>
+      <input type="number" id="planned-dur" min="1" placeholder="units">
+    </div>
+    <div class="form-field">
+      <label for="predecessors">Predecessors (Ctrl+click)</label>
+      <select id="predecessors" multiple></select>
+    </div>
+    <div class="form-field">
+      <label>&nbsp;</label>
+      <button id="add-btn">Add</button>
+    </div>
+  </div>
+
+  <!-- Schedule Table -->
+  <h2>Schedule</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Task</th>
+        <th>Planned</th>
+        <th>Actual</th>
+        <th>Predecessors</th>
+        <th>ES</th>
+        <th>EF</th>
+        <th>LS</th>
+        <th>LF</th>
+        <th>Float</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="schedule-body"></tbody>
+  </table>
+
+  <!-- Gantt Chart -->
+  <h2>Gantt Chart</h2>
+  <div class="form-row" style="margin-bottom: 6px; gap: 12px;">
+    <label style="cursor: pointer;"><input type="checkbox" id="toggle-planned" checked> Show Planned</label>
+    <label style="cursor: pointer;"><input type="checkbox" id="toggle-actual" checked> Show Actual</label>
+    <label style="cursor: pointer;"><input type="checkbox" id="toggle-relations" checked> Show Relationships</label>
+  </div>
+  <div id="gantt-container" class="gantt-container">
+    <div class="empty-msg" id="gantt-empty">No tasks to display.</div>
+  </div>
+  <div class="gantt-legend">
+    <span class="legend-item"><span class="legend-swatch legend-planned"></span> Planned</span>
+    <span class="legend-item"><span class="legend-swatch legend-actual"></span> Actual</span>
+    <span class="legend-item"><span class="legend-swatch legend-critical"></span> Critical</span>
+  </div>
+
+  <!-- Actions -->
+  <div class="actions">
+    <button id="export-btn">Export JSON</button>
+  </div>
+
+  <!-- Status Bar -->
+  <div class="status-bar">
+    <span id="status-tasks">Tasks: 0</span>
+    <span id="status-duration">Planned Duration: 0</span>
+    <span id="status-critical">Actual Duration: —</span>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
