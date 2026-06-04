@@ -19,11 +19,24 @@ const ganttEmpty         = document.getElementById("gantt-empty");
 const togglePlanned      = document.getElementById("toggle-planned");
 const toggleActual       = document.getElementById("toggle-actual");
 const toggleRelations    = document.getElementById("toggle-relations");
+const analysisBtn        = document.getElementById("analysis-btn");
+const analysisStatus     = document.getElementById("analysis-status");
+const analysisResults    = document.getElementById("analysis-results");
 
 // ── Toggle Event Listeners ─────────────────────────────────────────
 togglePlanned.addEventListener("change", () => render());
 toggleActual.addEventListener("change", () => render());
 toggleRelations.addEventListener("change", () => render());
+
+// ── Run Analysis ───────────────────────────────────────────────────
+analysisBtn.addEventListener("click", () => {
+  const cpm = computeCPM();
+  if (cpm.hasCycle) {
+    analysisStatus.textContent = "Cannot analyse: circular dependency.";
+    return;
+  }
+  renderAnalysis(cpm.projectDuration);
+});
 
 // ── Add Task ───────────────────────────────────────────────────────
 addBtn.addEventListener("click", () => {
@@ -238,6 +251,17 @@ function render() {
   statusCritical.textContent = actualDur !== null
     ? `Actual Duration: ${actualDur}`
     : `Actual Duration: —`;
+
+  // Enable/disable analysis button
+  const allHaveActuals = tasks.length > 0 && tasks.every(t => t.actualDuration !== null);
+  analysisBtn.disabled = !allHaveActuals || cpm.hasCycle;
+  if (!allHaveActuals) {
+    analysisStatus.textContent = tasks.length === 0
+      ? ""
+      : "Enter actual durations for all tasks to enable analysis.";
+  } else {
+    analysisStatus.textContent = "";
+  }
 
   // Render Gantt chart
   renderGantt(cpm);
@@ -525,6 +549,93 @@ function renderGantt(cpm) {
   }
 
   ganttContainer.appendChild(wrapper);
+}
+
+// ── Analysis Rendering ─────────────────────────────────────────────
+function renderAnalysis(plannedProjectDuration) {
+  analysisResults.innerHTML = "";
+
+  const result = computeShapleyValues(tasks, plannedProjectDuration);
+  if (!result) {
+    analysisResults.innerHTML = '<div class="empty-msg">Analysis not available.</div>';
+    return;
+  }
+
+  const { results, totalDelay, shapleySum, plannedDuration, actualDuration } = result;
+
+  // Summary header
+  const summary = document.createElement("div");
+  summary.className = "analysis-summary";
+
+  const delayLabel = totalDelay >= 0 ? "Total Delay" : "Total Acceleration";
+  const delayClass = totalDelay >= 0 ? "delay" : "accel";
+  summary.innerHTML = `
+    <span>Planned Duration: <strong>${plannedDuration}</strong></span>
+    <span>Actual Duration: <strong>${actualDuration}</strong></span>
+    <span class="${delayClass}">${delayLabel}: <strong>${totalDelay >= 0 ? "+" : ""}${round(totalDelay)}</strong></span>
+  `;
+  analysisResults.appendChild(summary);
+
+  // Results table
+  const table = document.createElement("table");
+  table.className = "analysis-table";
+
+  const thead = document.createElement("thead");
+  thead.innerHTML = `
+    <tr>
+      <th>Task</th>
+      <th>Planned</th>
+      <th>Actual</th>
+      <th>Deviation</th>
+      <th>Shapley Value</th>
+      <th>Responsibility %</th>
+    </tr>
+  `;
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  results.forEach(r => {
+    const tr = document.createElement("tr");
+
+    // Row color coding
+    if (r.deviation > 0) tr.className = "analysis-delay";
+    else if (r.deviation < 0) tr.className = "analysis-accel";
+
+    const svSign = r.shapleyValue >= 0 ? "+" : "";
+    const devSign = r.deviation >= 0 ? "+" : "";
+    const pctDisplay = totalDelay !== 0 ? round(r.responsibilityPct) + "%" : "—";
+
+    tr.innerHTML = `
+      <td>${r.name}</td>
+      <td>${r.planned}</td>
+      <td>${r.actual}</td>
+      <td>${devSign}${r.deviation}</td>
+      <td class="sv-cell ${r.shapleyValue > 0 ? 'sv-delay' : r.shapleyValue < 0 ? 'sv-accel' : ''}">
+        ${svSign}${round(r.shapleyValue)}
+      </td>
+      <td>${pctDisplay}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  // Totals row
+  const totalRow = document.createElement("tr");
+  totalRow.className = "analysis-total";
+  const sumSign = shapleySum >= 0 ? "+" : "";
+  totalRow.innerHTML = `
+    <td colspan="4"><strong>Total (Shapley Sum)</strong></td>
+    <td><strong>${sumSign}${round(shapleySum)}</strong></td>
+    <td></td>
+  `;
+  tbody.appendChild(totalRow);
+
+  table.appendChild(tbody);
+  analysisResults.appendChild(table);
+}
+
+// ── Round helper ───────────────────────────────────────────────────
+function round(value) {
+  return Math.round(value * 1000) / 1000;
 }
 
 // ── Initial render ─────────────────────────────────────────────────

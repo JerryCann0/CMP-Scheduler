@@ -297,3 +297,77 @@ button.delete-btn {
   background: #e8a0a0;
   border-color: #c06060;
 }
+
+/* ── Analysis Section ───────────────────────────────────────────── */
+.analysis-description {
+  font-size: 11px;
+  color: #555;
+  margin: 2px 0 4px 0;
+  line-height: 1.4;
+}
+
+.analysis-status {
+  font-size: 11px;
+  color: #888;
+  font-style: italic;
+}
+
+.analysis-summary {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  padding: 4px 6px;
+  background: #f4f4f4;
+  border: 1px solid #ccc;
+  margin-bottom: 4px;
+}
+
+.analysis-summary .delay {
+  color: #a03030;
+}
+
+.analysis-summary .accel {
+  color: #207820;
+}
+
+.analysis-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.analysis-table th,
+.analysis-table td {
+  border: 1px solid #999;
+  padding: 2px 6px;
+  text-align: left;
+}
+
+.analysis-table th {
+  background: #e8e8e8;
+  font-weight: 600;
+}
+
+tr.analysis-delay {
+  background: #fff4f4;
+}
+
+tr.analysis-accel {
+  background: #f0fff0;
+}
+
+tr.analysis-total {
+  background: #e8e8e8;
+  font-weight: 600;
+}
+
+.sv-cell.sv-delay {
+  color: #a03030;
+  font-weight: 600;
+}
+
+.sv-cell.sv-accel {
+  color: #207820;
+  font-weight: 600;
+}

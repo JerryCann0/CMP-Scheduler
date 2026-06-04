@@ -67,6 +67,19 @@
     <span class="legend-item"><span class="legend-swatch legend-critical"></span> Critical</span>
   </div>
 
+  <!-- Delay / Acceleration Analysis -->
+  <h2>Delay / Acceleration Analysis</h2>
+  <p class="analysis-description">
+    Apportions responsibility for project delay or acceleration using
+    <strong>Shapley values</strong> — every possible coalition of deviations is
+    evaluated to determine each task's fair share.
+  </p>
+  <div class="actions" style="margin: 6px 0;">
+    <button id="analysis-btn" disabled>Run Analysis</button>
+    <span id="analysis-status" class="analysis-status"></span>
+  </div>
+  <div id="analysis-results"></div>
+
   <!-- Actions -->
   <div class="actions">
     <button id="export-btn">Export JSON</button>
@@ -79,6 +92,7 @@
     <span id="status-critical">Actual Duration: —</span>
   </div>
 
+  <script src="analysis.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
