@@ -5,23 +5,23 @@ let tasks = [];
 let nextId = 1;
 
 // ── DOM refs ───────────────────────────────────────────────────────
-const taskNameInput      = document.getElementById("task-name");
-const plannedDurInput    = document.getElementById("planned-dur");
-const predecessorSelect  = document.getElementById("predecessors");
-const addBtn             = document.getElementById("add-btn");
-const scheduleBody       = document.getElementById("schedule-body");
-const exportBtn          = document.getElementById("export-btn");
-const statusTasks        = document.getElementById("status-tasks");
-const statusDuration     = document.getElementById("status-duration");
-const statusCritical     = document.getElementById("status-critical");
-const ganttContainer     = document.getElementById("gantt-container");
-const ganttEmpty         = document.getElementById("gantt-empty");
-const togglePlanned      = document.getElementById("toggle-planned");
-const toggleActual       = document.getElementById("toggle-actual");
-const toggleRelations    = document.getElementById("toggle-relations");
-const analysisBtn        = document.getElementById("analysis-btn");
-const analysisStatus     = document.getElementById("analysis-status");
-const analysisResults    = document.getElementById("analysis-results");
+const taskNameInput = document.getElementById("task-name");
+const plannedDurInput = document.getElementById("planned-dur");
+const predecessorSelect = document.getElementById("predecessors");
+const addBtn = document.getElementById("add-btn");
+const scheduleBody = document.getElementById("schedule-body");
+const exportBtn = document.getElementById("export-btn");
+const statusTasks = document.getElementById("status-tasks");
+const statusDuration = document.getElementById("status-duration");
+const statusCritical = document.getElementById("status-critical");
+const ganttContainer = document.getElementById("gantt-container");
+const ganttEmpty = document.getElementById("gantt-empty");
+const togglePlanned = document.getElementById("toggle-planned");
+const toggleActual = document.getElementById("toggle-actual");
+const toggleRelations = document.getElementById("toggle-relations");
+const analysisBtn = document.getElementById("analysis-btn");
+const analysisStatus = document.getElementById("analysis-status");
+const analysisResults = document.getElementById("analysis-results");
 
 // ── Toggle Event Listeners ─────────────────────────────────────────
 togglePlanned.addEventListener("change", () => render());
@@ -41,7 +41,7 @@ analysisBtn.addEventListener("click", () => {
 // ── Add Task ───────────────────────────────────────────────────────
 addBtn.addEventListener("click", () => {
   const name = taskNameInput.value.trim();
-  const dur  = parseInt(plannedDurInput.value, 10);
+  const dur = parseInt(plannedDurInput.value, 10);
 
   if (!name) { alert("Enter a task name."); return; }
   if (isNaN(dur) || dur < 1) { alert("Enter a valid duration (≥ 1)."); return; }
@@ -297,9 +297,9 @@ exportBtn.addEventListener("click", () => {
   };
 
   const blob = new Blob([JSON.stringify(output, null, 2)], { type: "application/json" });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement("a");
-  a.href     = url;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
   a.download = "cpm_schedule.json";
   a.click();
   URL.revokeObjectURL(url);
@@ -555,11 +555,14 @@ function renderGantt(cpm) {
 function renderAnalysis(plannedProjectDuration) {
   analysisResults.innerHTML = "";
 
-  const result = computeShapleyValues(tasks, plannedProjectDuration);
+  const result = computeShapleyValuesDebug(tasks, plannedProjectDuration);
   if (!result) {
     analysisResults.innerHTML = '<div class="empty-msg">Analysis not available.</div>';
     return;
   }
+
+  // Print step-by-step debug trace to browser console (F12 → Console)
+  printShapleyDebugLog(result.debugLog);
 
   const { results, totalDelay, shapleySum, plannedDuration, actualDuration } = result;
 
