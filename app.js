@@ -11,6 +11,8 @@ const predecessorSelect = document.getElementById("predecessors");
 const addBtn = document.getElementById("add-btn");
 const scheduleBody = document.getElementById("schedule-body");
 const exportBtn = document.getElementById("export-btn");
+const importBtn = document.getElementById("import-btn");
+const importFile = document.getElementById("import-file");
 const statusTasks = document.getElementById("status-tasks");
 const statusDuration = document.getElementById("status-duration");
 const statusCritical = document.getElementById("status-critical");
@@ -303,6 +305,103 @@ exportBtn.addEventListener("click", () => {
   a.download = "cpm_schedule.json";
   a.click();
   URL.revokeObjectURL(url);
+});
+
+// ── Import JSON ────────────────────────────────────────────────────
+importBtn.addEventListener("click", () => {
+  importFile.value = ""; // reset so same file can be re-imported
+  importFile.click();
+});
+
+importFile.addEventListener("change", () => {
+  const file = importFile.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    let parsed;
+    try {
+      parsed = JSON.parse(e.target.result);
+    } catch {
+      alert("Invalid JSON file.");
+      return;
+    }
+
+    // Accept both the full export format ({ tasks: [...] })
+    // and a bare array of task objects.
+    const rawTasks = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed.tasks)
+        ? parsed.tasks
+        : null;
+
+    if (!rawTasks) {
+      alert("Unrecognised format: expected a JSON file exported from this app.");
+      return;
+    }
+
+    // Validate required fields on each task
+    for (const t of rawTasks) {
+      if (typeof t.name !== "string" || !t.name.trim()) {
+        alert("Import failed: every task must have a non-empty \"name\".");
+        return;
+      }
+      if (typeof t.plannedDuration !== "number" || t.plannedDuration < 1) {
+        alert(`Import failed: task "${t.name}" has an invalid plannedDuration.`);
+        return;
+      }
+    }
+
+    // Check for duplicate names within the file
+    const names = rawTasks.map(t => t.name.trim());
+    const uniqueNames = new Set(names);
+    if (uniqueNames.size !== names.length) {
+      alert("Import failed: duplicate task names detected in the file.");
+      return;
+    }
+
+    // Build new tasks array.
+    // The exported format stores predecessors as [{id, name}];
+    // we remap them by name so IDs are stable even if the file was hand-edited.
+    tasks = [];
+    nextId = 1;
+
+    // First pass: create tasks without predecessors
+    const nameToId = {};
+    rawTasks.forEach(t => {
+      const newId = nextId++;
+      nameToId[t.name.trim()] = newId;
+      tasks.push({
+        id: newId,
+        name: t.name.trim(),
+        plannedDuration: t.plannedDuration,
+        actualDuration: (typeof t.actualDuration === "number" && t.actualDuration >= 0)
+          ? t.actualDuration
+          : null,
+        predecessors: [] // filled in second pass
+      });
+    });
+
+    // Second pass: resolve predecessors
+    rawTasks.forEach((raw, idx) => {
+      const task = tasks[idx];
+      const preds = raw.predecessors;
+      if (!Array.isArray(preds)) return;
+
+      preds.forEach(p => {
+        // Support {id, name} objects (export format) or bare name strings
+        const predName = typeof p === "object" ? p.name : String(p);
+        const predId = nameToId[predName];
+        if (predId !== undefined && predId !== task.id) {
+          task.predecessors.push(predId);
+        }
+      });
+    });
+
+    render();
+  };
+
+  reader.readAsText(file);
 });
 
 // ── Gantt Chart Rendering ──────────────────────────────────────────
