@@ -22,8 +22,8 @@
       <input type="number" id="planned-dur" min="1" placeholder="units">
     </div>
     <div class="form-field">
-      <label for="predecessors">Predecessors (Ctrl+click)</label>
-      <select id="predecessors" multiple></select>
+      <label>Predecessors</label>
+      <div id="predecessors-container" class="checkbox-container"></div>
     </div>
     <div class="form-field">
       <label>&nbsp;</label>
@@ -36,6 +36,7 @@
   <table>
     <thead>
       <tr>
+        <th style="width: 40px; text-align: center;"></th>
         <th>Task</th>
         <th>Planned</th>
         <th>Actual</th>
@@ -45,7 +46,7 @@
         <th>LS</th>
         <th>LF</th>
         <th>Float</th>
-        <th></th>
+        <th style="width: 140px; text-align: center;">Actions</th>
       </tr>
     </thead>
     <tbody id="schedule-body"></tbody>

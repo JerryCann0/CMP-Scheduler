@@ -3,11 +3,13 @@
 // ── State ──────────────────────────────────────────────────────────
 let tasks = [];
 let nextId = 1;
+let editingTaskId = null;
+let ganttOrder = [];
 
 // ── DOM refs ───────────────────────────────────────────────────────
 const taskNameInput = document.getElementById("task-name");
 const plannedDurInput = document.getElementById("planned-dur");
-const predecessorSelect = document.getElementById("predecessors");
+const predecessorSelect = document.getElementById("predecessors-container");
 const addBtn = document.getElementById("add-btn");
 const scheduleBody = document.getElementById("schedule-body");
 const exportBtn = document.getElementById("export-btn");
@@ -49,11 +51,12 @@ addBtn.addEventListener("click", () => {
   if (isNaN(dur) || dur < 1) { alert("Enter a valid duration (≥ 1)."); return; }
   if (tasks.some(t => t.name === name)) { alert("Task name must be unique."); return; }
 
-  // Gather selected predecessors
+  // Gather selected predecessors from checkboxes
   const preds = [];
-  for (const opt of predecessorSelect.selectedOptions) {
-    preds.push(parseInt(opt.value, 10));
-  }
+  const checkedBoxes = predecessorSelect.querySelectorAll('input[type="checkbox"]:checked');
+  checkedBoxes.forEach(cb => {
+    preds.push(parseInt(cb.value, 10));
+  });
 
   tasks.push({
     id: nextId++,
@@ -70,6 +73,7 @@ addBtn.addEventListener("click", () => {
 
 // ── Delete Task ────────────────────────────────────────────────────
 function deleteTask(id) {
+  if (editingTaskId === id) editingTaskId = null;
   // Remove from all predecessor lists first
   tasks.forEach(t => {
     t.predecessors = t.predecessors.filter(pid => pid !== id);
@@ -123,7 +127,7 @@ function computeCPM() {
 
   if (sorted.length !== tasks.length) {
     // Cycle detected – skip computation
-    return { nodes: Object.values(map), projectDuration: 0, hasCycle: true };
+    return { nodes: tasks.map(t => map[t.id]), projectDuration: 0, hasCycle: true };
   }
 
   // Forward pass
@@ -153,7 +157,7 @@ function computeCPM() {
     node.float = node.ls - node.es;
   });
 
-  return { nodes: sorted.map(id => map[id]), projectDuration, hasCycle: false };
+  return { nodes: tasks.map(t => map[t.id]), projectDuration, hasCycle: false };
 }
 
 // ── Compute actual project duration ────────────────────────────────
@@ -185,6 +189,8 @@ function computeActualDuration() {
     });
   }
 
+  if (sorted.length !== tasks.length) return null;
+
   sorted.forEach(id => {
     const node = map[id];
     let es = 0;
@@ -199,48 +205,137 @@ function computeActualDuration() {
 
 // ── Render ─────────────────────────────────────────────────────────
 function render() {
-  // Update predecessor dropdown
+  // Update predecessor dropdown checkboxes
   predecessorSelect.innerHTML = "";
-  tasks.forEach(t => {
-    const opt = document.createElement("option");
-    opt.value = t.id;
-    opt.textContent = t.name;
-    predecessorSelect.appendChild(opt);
-  });
-  // Deselect all by default
-  predecessorSelect.selectedIndex = -1;
+  if (tasks.length === 0) {
+    predecessorSelect.innerHTML = '<span style="color: #999; font-style: italic; font-size: 11px; padding: 2px;">No tasks available</span>';
+  } else {
+    tasks.forEach(t => {
+      const label = document.createElement("label");
+      label.innerHTML = `<input type="checkbox" value="${t.id}"> ${t.name}`;
+      predecessorSelect.appendChild(label);
+    });
+  }
 
   // Compute CPM
   const cpm = computeCPM();
 
   // Render table
   if (tasks.length === 0) {
-    scheduleBody.innerHTML = '<tr><td colspan="9" class="empty-msg">No tasks added.</td></tr>';
-  } else if (cpm.hasCycle) {
-    scheduleBody.innerHTML = '<tr><td colspan="9" class="empty-msg">Error: Circular dependency detected.</td></tr>';
+    scheduleBody.innerHTML = '<tr><td colspan="11" class="empty-msg">No tasks added.</td></tr>';
   } else {
     scheduleBody.innerHTML = "";
-    cpm.nodes.forEach(node => {
+    if (cpm.hasCycle) {
+      const warningRow = document.createElement("tr");
+      warningRow.innerHTML = `
+        <td colspan="11" style="background: #ffe0e0; color: #a03030; font-weight: 600; text-align: center; border: 1px solid #c06060;">
+          ⚠️ Circular dependency detected! Please edit predecessors to resolve.
+        </td>
+      `;
+      scheduleBody.appendChild(warningRow);
+    }
+
+    cpm.nodes.forEach((node, index) => {
       const tr = document.createElement("tr");
-      if (node.float === 0) tr.className = "critical";
+      if (node.float === 0 && !cpm.hasCycle) tr.className = "critical";
+
+      // Drag and drop event listeners
+      tr.draggable = false;
+      tr.addEventListener("dragstart", (e) => {
+        handleDragStart(e, index);
+      });
+      tr.addEventListener("dragover", handleDragOver);
+      tr.addEventListener("drop", (e) => handleDrop(e, index));
+      tr.addEventListener("dragend", (e) => {
+        tr.draggable = false;
+        handleDragEnd(e);
+      });
+
+      const isEditing = node.id === editingTaskId;
 
       const predNames = node.predecessors
         .map(pid => { const t = tasks.find(x => x.id === pid); return t ? t.name : "?"; })
         .join(", ") || "—";
 
-      tr.innerHTML = `
-        <td>${node.name}</td>
-        <td>${node.plannedDuration}</td>
-        <td><input type="number" min="0" value="${node.actualDuration !== null ? node.actualDuration : ""}" 
-            onchange="setActual(${node.id}, this.value)" placeholder="—"></td>
-        <td>${predNames}</td>
-        <td>${node.es}</td>
-        <td>${node.ef}</td>
-        <td>${node.ls}</td>
-        <td>${node.lf}</td>
-        <td>${node.float}</td>
-        <td><button class="delete-btn" onclick="deleteTask(${node.id})">✕</button></td>
-      `;
+      if (isEditing) {
+        // Build predecessor checkbox list for editing (exclude self)
+        const predCheckboxes = tasks
+          .filter(t => t.id !== node.id)
+          .map(t => {
+            const isChecked = node.predecessors.includes(t.id) ? "checked" : "";
+            return `
+              <label>
+                <input type="checkbox" name="edit-preds-${node.id}" value="${t.id}" ${isChecked}>
+                ${t.name}
+              </label>
+            `;
+          })
+          .join("") || '<span style="color: #999; font-style: italic; font-size: 11px;">No other tasks</span>';
+
+        tr.innerHTML = `
+          <td style="text-align: center;"><span style="color: #ccc; cursor: not-allowed;">☰</span></td>
+          <td><input type="text" id="edit-name-${node.id}" class="edit-input" value="${node.name}"></td>
+          <td><input type="number" id="edit-dur-${node.id}" class="edit-input" min="1" value="${node.plannedDuration}"></td>
+          <td><input type="number" min="0" value="${node.actualDuration !== null ? node.actualDuration : ""}" disabled placeholder="—"></td>
+          <td>
+            <div class="edit-preds-container">
+              ${predCheckboxes}
+            </div>
+          </td>
+          <td>—</td>
+          <td>—</td>
+          <td>—</td>
+          <td>—</td>
+          <td>—</td>
+          <td>
+            <div class="action-btn-group">
+              <button class="action-btn save-btn" onclick="saveEdit(${node.id})">Save</button>
+              <button class="action-btn cancel-btn" onclick="cancelEdit()">Cancel</button>
+            </div>
+          </td>
+        `;
+      } else {
+        const esVal = cpm.hasCycle ? "—" : node.es;
+        const efVal = cpm.hasCycle ? "—" : node.ef;
+        const lsVal = cpm.hasCycle ? "—" : node.ls;
+        const lfVal = cpm.hasCycle ? "—" : node.lf;
+        const floatVal = cpm.hasCycle ? "—" : node.float;
+
+        tr.innerHTML = `
+          <td style="text-align: center; vertical-align: middle; white-space: nowrap;">
+            <span class="drag-handle" title="Drag to reorder" style="cursor: grab;">☰</span>
+            <button class="order-btn" onclick="moveTask(${index}, -1)" ${index === 0 ? "disabled" : ""} title="Move Up">▲</button>
+            <button class="order-btn" onclick="moveTask(${index}, 1)" ${index === tasks.length - 1 ? "disabled" : ""} title="Move Down">▼</button>
+          </td>
+          <td>${node.name}</td>
+          <td>${node.plannedDuration}</td>
+          <td><input type="number" min="0" value="${node.actualDuration !== null ? node.actualDuration : ""}" 
+              onchange="setActual(${node.id}, this.value)" placeholder="—"></td>
+          <td>${predNames}</td>
+          <td>${esVal}</td>
+          <td>${efVal}</td>
+          <td>${lsVal}</td>
+          <td>${lfVal}</td>
+          <td>${floatVal}</td>
+          <td>
+            <div class="action-btn-group">
+              <button class="action-btn edit-btn" onclick="startEdit(${node.id})">✏️ Edit</button>
+              <button class="action-btn delete-btn" onclick="deleteTask(${node.id})">✕ Delete</button>
+            </div>
+          </td>
+        `;
+
+        // Attach drag handle triggers
+        const handle = tr.querySelector(".drag-handle");
+        if (handle) {
+          handle.addEventListener("mousedown", () => {
+            tr.draggable = true;
+          });
+          handle.addEventListener("mouseup", () => {
+            tr.draggable = false;
+          });
+        }
+      }
       scheduleBody.appendChild(tr);
     });
   }
@@ -268,6 +363,121 @@ function render() {
   // Render Gantt chart
   renderGantt(cpm);
 }
+
+// ── Edit Task Functions ────────────────────────────────────────────
+function startEdit(id) {
+  editingTaskId = id;
+  render();
+}
+
+// ── Cancel Edit Task Function ──────────────────────────────────────
+function cancelEdit() {
+  editingTaskId = null;
+  render();
+}
+
+// ── Save Edit Task Function ────────────────────────────────────────
+function saveEdit(id) {
+  const nameInput = document.getElementById(`edit-name-${id}`);
+  const durationInput = document.getElementById(`edit-dur-${id}`);
+  const predContainer = document.querySelector(`.edit-preds-container`);
+
+  if (!nameInput || !durationInput) return;
+
+  const name = nameInput.value.trim();
+  const dur = parseInt(durationInput.value, 10);
+
+  if (!name) { alert("Enter a task name."); return; }
+  if (isNaN(dur) || dur < 1) { alert("Enter a valid duration (≥ 1)."); return; }
+
+  const task = tasks.find(t => t.id === id);
+  if (!task) return;
+
+  // Validate unique name among other tasks
+  if (tasks.some(t => t.id !== id && t.name === name)) {
+    alert("Task name must be unique.");
+    return;
+  }
+
+  // Gather selected predecessors from checkboxes
+  const preds = [];
+  if (predContainer) {
+    const checkedBoxes = predContainer.querySelectorAll(`input[type="checkbox"]:checked`);
+    checkedBoxes.forEach(cb => {
+      preds.push(parseInt(cb.value, 10));
+    });
+  }
+
+  // Temporarily store old settings to check for cycles
+  const oldPredecessors = task.predecessors;
+  const oldName = task.name;
+  const oldPlannedDuration = task.plannedDuration;
+
+  task.name = name;
+  task.plannedDuration = dur;
+  task.predecessors = preds;
+
+  // Check for cycle
+  const hasCycle = topologicalSort(tasks) === null;
+  if (hasCycle) {
+    alert("Cannot save: this change would introduce a circular dependency.");
+    // Revert
+    task.name = oldName;
+    task.plannedDuration = oldPlannedDuration;
+    task.predecessors = oldPredecessors;
+    return;
+  }
+
+  editingTaskId = null;
+  render();
+}
+
+// ── Move Task (Manual Reordering) ──────────────────────────────────
+function moveTask(index, direction) {
+  const newIndex = index + direction;
+  if (newIndex < 0 || newIndex >= tasks.length) return;
+
+  const temp = tasks[index];
+  tasks[index] = tasks[newIndex];
+  tasks[newIndex] = temp;
+  render();
+}
+
+// ── Drag & Drop Functions ──────────────────────────────────────────
+let dragSrcIndex = null;
+
+function handleDragStart(e, index) {
+  dragSrcIndex = index;
+  e.dataTransfer.effectAllowed = "move";
+  e.target.classList.add("dragging");
+}
+
+function handleDragOver(e) {
+  if (e.preventDefault) {
+    e.preventDefault();
+  }
+  e.dataTransfer.dropEffect = "move";
+  return false;
+}
+
+function handleDrop(e, targetIndex) {
+  if (dragSrcIndex === null || dragSrcIndex === targetIndex) return;
+
+  // Reorder in tasks array
+  const draggedTask = tasks.splice(dragSrcIndex, 1)[0];
+  tasks.splice(targetIndex, 0, draggedTask);
+
+  render();
+}
+
+function handleDragEnd(e) {
+  const draggingRow = document.querySelector(".dragging");
+  if (draggingRow) {
+    draggingRow.classList.remove("dragging");
+  }
+  dragSrcIndex = null;
+}
+
 
 // ── Export JSON ────────────────────────────────────────────────────
 exportBtn.addEventListener("click", () => {
@@ -489,9 +699,17 @@ function renderGantt(cpm) {
   cpm.nodes.forEach((node, idx) => { rowIndex[node.id] = idx; });
 
   // Build rows
-  cpm.nodes.forEach(node => {
+  cpm.nodes.forEach((node, index) => {
     const row = document.createElement("div");
     row.className = "gantt-row";
+    row.draggable = true;
+
+    row.addEventListener("dragstart", (e) => {
+      handleDragStart(e, index);
+    });
+    row.addEventListener("dragover", handleDragOver);
+    row.addEventListener("drop", (e) => handleDrop(e, index));
+    row.addEventListener("dragend", handleDragEnd);
 
     const label = document.createElement("div");
     label.className = "gantt-row-label";

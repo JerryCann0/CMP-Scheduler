@@ -205,6 +205,12 @@ button.delete-btn {
   display: flex;
   border-bottom: 1px solid #ddd;
   height: 22px;
+  cursor: grab;
+  user-select: none;
+}
+.gantt-row.dragging {
+  opacity: 0.4;
+  background-color: #e0e0e0;
 }
 
 .gantt-row:last-child {
@@ -371,3 +377,133 @@ tr.analysis-total {
   color: #207820;
   font-weight: 600;
 }
+
+/* Drag and Drop & Editing styles */
+tr[draggable="true"] {
+  user-select: none;
+}
+.drag-handle {
+  cursor: grab;
+  font-size: 14px;
+  color: #888;
+  display: inline-block;
+  padding: 0 4px;
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+tr.dragging {
+  opacity: 0.4;
+  background-color: #e0e0e0 !important;
+}
+.order-btn {
+  border: none;
+  background: transparent;
+  padding: 1px 3px;
+  font-size: 10px;
+  cursor: pointer;
+  color: #666;
+}
+.order-btn:hover {
+  color: #000;
+  background: #ddd;
+}
+.edit-input {
+  width: 100%;
+  font-size: 12px;
+  padding: 1px 2px;
+  box-sizing: border-box;
+}
+.edit-select {
+  width: 100%;
+  font-size: 11px;
+  height: 60px;
+  padding: 1px;
+}
+.action-btn-group {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+.action-btn {
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid #ccc;
+  background: #f5f5f5;
+  cursor: pointer;
+  border-radius: 2px;
+}
+.action-btn:hover {
+  background: #e0e0e0;
+}
+.action-btn.save-btn {
+  background: #e6f7ff;
+  border-color: #91d5ff;
+  color: #1890ff;
+}
+.action-btn.save-btn:hover {
+  background: #bae7ff;
+}
+.action-btn.cancel-btn {
+  background: #fff0f6;
+  border-color: #ffadd2;
+  color: #eb2f96;
+}
+.action-btn.cancel-btn:hover {
+  background: #ffd6e7;
+}
+
+.checkbox-container {
+  border: 1px solid #999;
+  background: #fff;
+  height: 80px;
+  width: 140px;
+  overflow-y: auto;
+  padding: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.checkbox-container label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #000;
+  cursor: pointer;
+  margin: 0;
+  white-space: nowrap;
+}
+.checkbox-container label input {
+  margin: 0;
+  width: auto;
+  cursor: pointer;
+}
+.edit-preds-container {
+  max-height: 70px;
+  overflow-y: auto;
+  border: 1px solid #ccc;
+  padding: 2px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 130px;
+}
+.edit-preds-container label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #000;
+  cursor: pointer;
+  margin: 0;
+  white-space: nowrap;
+}
+.edit-preds-container label input {
+  margin: 0;
+  width: auto;
+  cursor: pointer;
+}
+
+
