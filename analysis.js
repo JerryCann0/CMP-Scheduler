@@ -1,234 +1,207 @@
 "use strict";
 
-// ════════════════════════════════════════════════════════════════════
-//  Shapley Value Delay / Acceleration Analysis
+// ═════════════════════════════════════════════════════════════════
+// Shapley Value Calculator for Schedule Analysis
+// ═════════════════════════════════════════════════════════════════
+// Players  = tasks.
+// Baseline = the all-planned schedule, v(∅).
+// v(S)     = project completion time when every task in coalition S
+//            runs at its ACTUAL duration and every task outside S
+//            runs at its PLANNED duration (dependencies/order are
+//            always respected via a single forward CPM pass) — with
+//            one exception: for a SINGLETON coalition {i} where task i
+//            is accelerated, v({i}) is forced to v(∅) minus i's full
+//            acceleration amount, even if i isn't on the critical path
+//            on its own. See the singleton-override note further down.
+// φ_i      = task i's Shapley value = its fairly-weighted average
+//            marginal contribution to v(S) across every coalition,
+//            i.e. how much of the (actual − planned) deviation is
+//            attributable to that task.
 //
-//  Players  = tasks whose actual duration ≠ planned duration
-//  v(S)     = change in project duration when coalition S uses actual
-//             durations and all others use planned durations
-//  φᵢ       = Shapley value for player i (fair share of total delay)
-//
-//  Special rule – Acceleration:
-//    If a task was accelerated (actual < planned), its solo coalition
-//    value is forced to at least -accelerationAmount, i.e. the total
-//    project time is always decreased by the acceleration amount in
-//    the solo coalition, even if the task is on a non-critical path.
-//    All other coalition values are unchanged.
-// ════════════════════════════════════════════════════════════════════
+// This enumerates the full 2^n powerset of coalitions (exact
+// Shapley calculation), which is why task count is capped below.
+const SHAPLEY_MAX_EXACT_TASKS = 20;   // 2^20 ≈ 1M coalitions — practical ceiling
+const SHAPLEY_DEBUG_DETAIL_LIMIT = 10; // keep per-coalition console trace readable
 
-// ── Topological Sort (Kahn's algorithm) ────────────────────────────
-// Returns an array of task ids in topological order, or null if a
-// cycle is detected.
-function topologicalSort(tasks) {
-  const idSet = new Set(tasks.map(t => t.id));
-  const inDeg = {};
-  tasks.forEach(t => { inDeg[t.id] = 0; });
-  tasks.forEach(t => {
-    t.predecessors.forEach(pid => {
-      if (idSet.has(pid)) inDeg[t.id]++;
-    });
-  });
-
-  const queue = [];
-  tasks.forEach(t => { if (inDeg[t.id] === 0) queue.push(t.id); });
-
-  const sorted = [];
-  while (queue.length) {
-    const id = queue.shift();
-    sorted.push(id);
-    tasks.forEach(t => {
-      if (t.predecessors.includes(id)) {
-        inDeg[t.id]--;
-        if (inDeg[t.id] === 0) queue.push(t.id);
-      }
-    });
-  }
-
-  return sorted.length === tasks.length ? sorted : null;
+function popcount(x) {
+  let c = 0;
+  while (x) { c += x & 1; x >>= 1; }
+  return c;
 }
 
-// ── Forward-pass project duration with duration overrides ──────────
-// durationOverrides is a Map(taskId → duration).  Tasks not in the
-// map use their plannedDuration.
-function computeProjectDurationWithOverrides(tasks, durationOverrides) {
-  const sorted = topologicalSort(tasks);
-  if (!sorted) return 0; // cycle — shouldn't happen if scheduler validated
+function computeShapleyValuesDebug(taskList, plannedProjectDuration) {
+  const n = taskList.length;
+  if (n === 0) return null;
+  if (taskList.some(t => t.actualDuration === null)) return null;
 
-  const map = {};
-  tasks.forEach(t => {
-    map[t.id] = {
-      id: t.id,
-      predecessors: t.predecessors,
-      duration: durationOverrides.has(t.id)
-        ? durationOverrides.get(t.id)
-        : t.plannedDuration,
-      ef: 0
-    };
-  });
-
-  sorted.forEach(id => {
-    const node = map[id];
-    let es = 0;
-    if (node.predecessors.length > 0) {
-      es = Math.max(...node.predecessors.map(pid => map[pid] ? map[pid].ef : 0));
-    }
-    node.ef = es + node.duration;
-  });
-
-  return Math.max(...Object.values(map).map(n => n.ef), 0);
-}
-
-// ── Factorial helper ───────────────────────────────────────────────
-function factorial(n) {
-  let result = 1;
-  for (let i = 2; i <= n; i++) result *= i;
-  return result;
-}
-
-// ── Main: Compute Shapley Values ───────────────────────────────────
-// Returns { results, totalDelay, shapleySum, plannedDuration,
-//           actualDuration } or null if analysis is not possible.
-function computeShapleyValues(tasks, plannedProjectDuration) {
-  // Guard: need all actual durations filled in
-  if (tasks.length === 0) return null;
-  if (tasks.some(t => t.actualDuration === null || t.actualDuration === undefined)) {
+  if (n > SHAPLEY_MAX_EXACT_TASKS) {
+    console.warn(
+      `[Shapley] Skipped: ${n} tasks would require evaluating 2^${n} coalitions, ` +
+      `which is impractical to compute exactly. Exact analysis currently supports ` +
+      `up to ${SHAPLEY_MAX_EXACT_TASKS} tasks.`
+    );
     return null;
   }
 
-  // Identify deviated tasks (players)
-  const players = tasks; // All tasks are treated as players for Shapley analysis
+  const order = topologicalSort(taskList);
+  if (!order) return null; // circular dependency — caller already guards this too
 
-  // Compute actual project duration (all deviations applied)
-  const allOverrides = new Map();
-  tasks.forEach(t => { allOverrides.set(t.id, t.actualDuration); });
-  const actualProjectDuration = computeProjectDurationWithOverrides(tasks, allOverrides);
-  const totalDelay = actualProjectDuration - plannedProjectDuration;
+  // Map each task to a bit position so a coalition can be a bitmask.
+  const idToIndex = {};
+  taskList.forEach((t, i) => { idToIndex[t.id] = i; });
+  const predIndices = taskList.map(t =>
+    t.predecessors.map(pid => idToIndex[pid]).filter(idx => idx !== undefined)
+  );
+  const orderIdx = order.map(id => idToIndex[id]);
 
-  // If no tasks deviated, everything is zero
-  if (players.length === 0) {
-    return {
-      results: tasks.map(t => ({
-        id: t.id,
-        name: t.name,
-        planned: t.plannedDuration,
-        actual: t.actualDuration,
-        deviation: 0,
-        shapleyValue: 0,
-        responsibilityPct: 0
-      })),
-      totalDelay,
-      shapleySum: 0,
-      plannedDuration: plannedProjectDuration,
-      actualDuration: actualProjectDuration
-    };
+  const numCoalitions = 1 << n; // 2^n, including the empty coalition
+
+  // ── Characteristic function v(S) ──────────────────────────────────
+  // One forward CPM pass: task uses actualDuration if its bit is set
+  // in `mask`, otherwise plannedDuration. Returns project duration
+  // (the longest path / max early-finish, same definition computeCPM
+  // and computeActualDuration use).
+  const efScratch = new Array(n);
+  function valueOf(mask) {
+    for (let k = 0; k < orderIdx.length; k++) {
+      const idx = orderIdx[k];
+      const preds = predIndices[idx];
+      let es = 0;
+      for (let p = 0; p < preds.length; p++) {
+        if (efScratch[preds[p]] > es) es = efScratch[preds[p]];
+      }
+      const usesActual = (mask & (1 << idx)) !== 0;
+      const dur = usesActual ? taskList[idx].actualDuration : taskList[idx].plannedDuration;
+      efScratch[idx] = es + dur;
+    }
+    let maxEf = 0;
+    for (let i = 0; i < n; i++) if (efScratch[i] > maxEf) maxEf = efScratch[i];
+    return maxEf;
   }
 
-  const n = players.length;
-  const playerIds = players.map(p => p.id);
-  const playerIdSet = new Set(playerIds);
+  // Precompute v(S) for every one of the 2^n coalitions once.
+  //
+  // Special case: for a SINGLETON coalition {i}, if task i is accelerated
+  // (actualDuration < plannedDuration), credit it the full acceleration
+  // amount directly — v({i}) = v(∅) − (planned_i − actual_i) — rather than
+  // letting the forward pass decide whether i happens to be the bottleneck
+  // on its own. Under plain CPM, accelerating a non-critical task changes
+  // nothing (some other path is still longer), so v({i}) would equal
+  // v(∅) and the task would get no credit at all for finishing early.
+  // This override guarantees every accelerated task's singleton value
+  // reflects its own time saved, regardless of criticality. That adjusted
+  // v({i}) is stored in the same vValues array used everywhere else, so
+  // it's automatically reused as the "S" term in every later marginal
+  // contribution v(S∪{j}) − v(S) where S happens to be {i} — i.e. the
+  // adjustment carries forward into other tasks' calculations too, not
+  // just task i's own.
+  //
+  // Delays, and every coalition of size ≠ 1, are unaffected — they still
+  // go through the normal forward pass.
+  const vValues = new Array(numCoalitions);
+  vValues[0] = valueOf(0);
+  const baseline = vValues[0]; // v(∅): everyone planned
 
-  // ── Pre-compute v(S) for every coalition S ⊆ players ─────────
-  // We represent each coalition as a bitmask over the players array.
-  // coalitionValue[mask] = project duration change for that coalition.
-  const totalCoalitions = 1 << n;
-  const coalitionValue = new Array(totalCoalitions);
-
-  for (let mask = 0; mask < totalCoalitions; mask++) {
-    // Build duration overrides: players in the coalition use actual,
-    // everyone else uses planned (default in the function).
-    const overrides = new Map();
-    for (let bit = 0; bit < n; bit++) {
-      if (mask & (1 << bit)) {
-        const player = players[bit];
-        overrides.set(player.id, player.actualDuration);
+  for (let mask = 1; mask < numCoalitions; mask++) {
+    if ((mask & (mask - 1)) === 0) { // popcount(mask) === 1 → singleton coalition
+      const idx = Math.log2(mask);
+      const t = taskList[idx];
+      const acceleration = t.plannedDuration - t.actualDuration;
+      if (acceleration > 0) {
+        vValues[mask] = baseline - acceleration;
+        continue;
       }
     }
-
-    const projDur = computeProjectDurationWithOverrides(tasks, overrides);
-    coalitionValue[mask] = projDur - plannedProjectDuration;
+    vValues[mask] = valueOf(mask);
   }
 
-  // ── Apply acceleration adjustment to ALL coalitions containing
-  //    an accelerated player ────────────────────────────────────
-  //
-  // For accelerated tasks (actual < planned), the CPM forward pass
-  // may show no change if the task is on a non-critical path.  The
-  // intended rule is that the project duration is ALWAYS reduced by
-  // the full acceleration amount whenever an accelerated player is
-  // included in a coalition.
-  //
-  // We iterate coalitions in ascending mask order (fewest members
-  // first).  For every coalition S that contains accelerated player i
-  // we enforce:
-  //
-  //   v(S) ≤ v(S \ {i}) - acceleration
-  //
-  // i.e. adding i to any existing coalition must reduce the coalition
-  // value by at least the acceleration.  Taking the minimum respects
-  // cases where the CPM already shows a larger reduction.
-  //
-  // Processing in ascending mask order guarantees that when we adjust
-  // v(S), the value v(S \ {i}) has already been adjusted (or was
-  // never changed because it contains no accelerated players).
+  const fullValue = vValues[numCoalitions - 1];  // v(N): everyone actual
 
-  // Collect accelerated players once
-  const accelerations = players.map(p => p.plannedDuration - p.actualDuration);
+  if (round(baseline) !== round(plannedProjectDuration)) {
+    console.warn(
+      `[Shapley] Baseline mismatch: coalition-based v(∅)=${baseline} vs ` +
+      `supplied plannedProjectDuration=${plannedProjectDuration}. Using v(∅).`
+    );
+  }
 
-  for (let mask = 1; mask < totalCoalitions; mask++) {
-    for (let bit = 0; bit < n; bit++) {
-      if (!(mask & (1 << bit))) continue;          // player i not in S
-      const accel = accelerations[bit];
-      if (accel <= 0) continue;                    // not accelerated
+  // Factorials for the standard Shapley weighting: |S|!(n-|S|-1)!/n!
+  const fact = [1];
+  for (let i = 1; i <= n; i++) fact[i] = fact[i - 1] * i;
+  const nFact = fact[n];
 
-      const withoutI = mask ^ (1 << bit);          // S \ {i}
-      const forcedValue = coalitionValue[withoutI] - accel;
-      if (coalitionValue[mask] > forcedValue) {
-        coalitionValue[mask] = forcedValue;
+  const shapley = new Array(n).fill(0);
+  const keepDetail = n <= SHAPLEY_DEBUG_DETAIL_LIMIT;
+
+  // Full coalition list, for the "set of all possible coalitions" trace.
+  let coalitionLog = null;
+  if (keepDetail) {
+    coalitionLog = [];
+    for (let mask = 0; mask < numCoalitions; mask++) {
+      const members = [];
+      for (let i = 0; i < n; i++) if (mask & (1 << i)) members.push(taskList[i].name);
+      coalitionLog.push({
+        mask,
+        members,
+        value: vValues[mask],
+        deltaFromBaseline: vValues[mask] - baseline
+      });
+    }
+  }
+
+  const perTaskLog = taskList.map(t => ({
+    taskId: t.id,
+    taskName: t.name,
+    marginalContributions: keepDetail ? [] : null
+  }));
+
+  // For every coalition T that contains player i, S = T \ {i} is the
+  // coalition "before" i joins. The marginal contribution v(T) - v(S)
+  // is weighted by |S|!(n-|S|-1)!/n! and accumulated into φ_i.
+  for (let mask = 1; mask < numCoalitions; mask++) {
+    for (let i = 0; i < n; i++) {
+      const bit = 1 << i;
+      if (!(mask & bit)) continue;
+
+      const sMask = mask & ~bit;
+      const sSize = popcount(sMask);
+      const weight = (fact[sSize] * fact[n - sSize - 1]) / nFact;
+      const marginal = vValues[mask] - vValues[sMask];
+      const weightedContribution = weight * marginal;
+      shapley[i] += weightedContribution;
+
+      if (keepDetail) {
+        const sMembers = [];
+        for (let k = 0; k < n; k++) if (sMask & (1 << k)) sMembers.push(taskList[k].name);
+        perTaskLog[i].marginalContributions.push({
+          coalitionBefore: sMembers,
+          valueWithout: vValues[sMask],
+          valueWith: vValues[mask],
+          marginal,
+          weight,
+          weightedContribution
+        });
       }
     }
   }
 
-  // ── Compute Shapley values ────────────────────────────────────
-  // φᵢ = Σ over S ⊆ N\{i}:
-  //       [ |S|! × (n-|S|-1)! / n! ] × [ v(S∪{i}) - v(S) ]
-  const nFactorial = factorial(n);
-  const shapleyValues = new Array(n).fill(0);
+  perTaskLog.forEach((p, i) => { p.shapleyValue = shapley[i]; });
 
-  for (let i = 0; i < n; i++) {
-    const iBit = 1 << i;
+  const actualDuration = fullValue;
+  const totalDelay = actualDuration - baseline;
+  const shapleySum = shapley.reduce((a, b) => a + b, 0);
 
-    // Enumerate all subsets S of N\{i}
-    // We iterate over all masks that do NOT contain bit i
-    for (let mask = 0; mask < totalCoalitions; mask++) {
-      if (mask & iBit) continue; // skip coalitions containing i
-
-      const sSize = popcount(mask);
-      const weight = factorial(sSize) * factorial(n - sSize - 1) / nFactorial;
-      const marginalContribution = coalitionValue[mask | iBit] - coalitionValue[mask];
-
-      shapleyValues[i] += weight * marginalContribution;
-    }
-  }
-
-  // ── Build results ─────────────────────────────────────────────
-  // Map Shapley values back to all tasks (non-deviated tasks get 0)
-  const shapleyMap = new Map();
-  for (let i = 0; i < n; i++) {
-    shapleyMap.set(players[i].id, shapleyValues[i]);
-  }
-
-  const shapleySum = shapleyValues.reduce((sum, v) => sum + v, 0);
-
-  const results = tasks.map(t => {
-    const sv = shapleyMap.get(t.id) || 0;
+  const results = taskList.map((t, i) => {
+    const deviation = t.actualDuration - t.plannedDuration;
+    const shapleyValue = shapley[i];
+    const responsibilityPct = totalDelay !== 0 ? (shapleyValue / totalDelay) * 100 : 0;
     return {
       id: t.id,
       name: t.name,
       planned: t.plannedDuration,
       actual: t.actualDuration,
-      deviation: t.actualDuration - t.plannedDuration,
-      shapleyValue: sv,
-      responsibilityPct: totalDelay !== 0 ? (sv / totalDelay) * 100 : 0
+      deviation,
+      shapleyValue,
+      responsibilityPct
     };
   });
 
@@ -236,227 +209,61 @@ function computeShapleyValues(tasks, plannedProjectDuration) {
     results,
     totalDelay,
     shapleySum,
-    plannedDuration: plannedProjectDuration,
-    actualDuration: actualProjectDuration
+    plannedDuration: baseline,
+    actualDuration,
+    debugLog: {
+      n,
+      numCoalitions,
+      baseline,
+      fullValue,
+      detailKept: keepDetail,
+      coalitions: coalitionLog, // null when n > SHAPLEY_DEBUG_DETAIL_LIMIT
+      perTask: perTaskLog
+    }
   };
 }
 
-// ── Popcount: count set bits in an integer ─────────────────────────
-function popcount(x) {
-  let count = 0;
-  while (x) {
-    count += x & 1;
-    x >>= 1;
-  }
-  return count;
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  DEBUG VERSION – Step-by-step trace of Shapley Value computation
-//
-//  Returns the same object as computeShapleyValues(), with an added
-//  `debugLog` array of { step, detail } entries that trace every
-//  calculation in human-readable form.
-// ════════════════════════════════════════════════════════════════════
-function computeShapleyValuesDebug(tasks, plannedProjectDuration) {
-  const log = [];
-  const step = (label, detail) => log.push({ step: label, detail });
-
-  // ── Helper: coalition bitmask → readable set notation ─────────
-  function coalitionName(mask, players) {
-    if (mask === 0) return "∅";
-    const names = [];
-    for (let bit = 0; bit < players.length; bit++) {
-      if (mask & (1 << bit)) names.push(players[bit].name || players[bit].id);
-    }
-    return "{" + names.join(", ") + "}";
-  }
-
-  step("START", `Planned project duration = ${plannedProjectDuration}`);
-
-  // Guard checks
-  if (tasks.length === 0) { step("ABORT", "No tasks"); return null; }
-  if (tasks.some(t => t.actualDuration === null || t.actualDuration === undefined)) {
-    step("ABORT", "Some tasks missing actual durations");
-    return null;
-  }
-
-  // ── Identify players ──────────────────────────────────────────
-  const players = tasks.filter(t => t.actualDuration !== t.plannedDuration);
-  step("PLAYERS", `${players.length} task(s) deviated from plan:`);
-  players.forEach((p, i) => {
-    const diff = p.actualDuration - p.plannedDuration;
-    const label = diff > 0 ? `DELAYED by ${diff}` : `ACCELERATED by ${Math.abs(diff)}`;
-    step("PLAYER", `  [${i}] "${p.name || p.id}" — planned: ${p.plannedDuration}, actual: ${p.actualDuration} → ${label}`);
-  });
-
-  // ── Actual project duration ───────────────────────────────────
-  const allOverrides = new Map();
-  tasks.forEach(t => { allOverrides.set(t.id, t.actualDuration); });
-  const actualProjectDuration = computeProjectDurationWithOverrides(tasks, allOverrides);
-  const totalDelay = actualProjectDuration - plannedProjectDuration;
-  step("ACTUAL DURATION", `Actual project duration (all actuals applied) = ${actualProjectDuration}`);
-  step("TOTAL DELAY", `Total delay = ${actualProjectDuration} - ${plannedProjectDuration} = ${totalDelay}`);
-
-  if (players.length === 0) {
-    step("DONE", "No deviations — all Shapley values are 0");
-    return {
-      results: tasks.map(t => ({
-        id: t.id, name: t.name, planned: t.plannedDuration,
-        actual: t.actualDuration, deviation: 0, shapleyValue: 0, responsibilityPct: 0
-      })),
-      totalDelay, shapleySum: 0,
-      plannedDuration: plannedProjectDuration,
-      actualDuration: actualProjectDuration,
-      debugLog: log
-    };
-  }
-
-  const n = players.length;
-  const playerIds = players.map(p => p.id);
-  const playerIdSet = new Set(playerIds);
-
-  // ── Compute v(S) for every coalition ──────────────────────────
-  step("COALITION VALUES", `Computing v(S) for all 2^${n} = ${1 << n} coalitions...`);
-  const totalCoalitions = 1 << n;
-  const coalitionValue = new Array(totalCoalitions);
-
-  for (let mask = 0; mask < totalCoalitions; mask++) {
-    const overrides = new Map();
-    for (let bit = 0; bit < n; bit++) {
-      if (mask & (1 << bit)) {
-        const player = players[bit];
-        overrides.set(player.id, player.actualDuration);
-      }
-    }
-    const projDur = computeProjectDurationWithOverrides(tasks, overrides);
-    coalitionValue[mask] = projDur - plannedProjectDuration;
-
-    const cName = coalitionName(mask, players);
-    step("v(S)", `  v(${cName}) = ${projDur} - ${plannedProjectDuration} = ${coalitionValue[mask]}`);
-  }
-
-  // ── Acceleration adjustment ───────────────────────────────────
-  // For accelerated tasks, ensure every coalition that contains an
-  // accelerated player reflects the full acceleration.  We process
-  // masks in ascending order so v(S \ {i}) is always settled before
-  // we use it to compute the forced value for v(S).
-  step("ACCELERATION ADJ",
-    "Applying acceleration adjustments to ALL coalitions containing " +
-    "accelerated players (ascending mask order)..."
-  );
-
-  const accelerations = players.map(p => p.plannedDuration - p.actualDuration);
-
-  for (let mask = 1; mask < totalCoalitions; mask++) {
-    for (let bit = 0; bit < n; bit++) {
-      if (!(mask & (1 << bit))) continue;       // player i not in coalition
-      const accel = accelerations[bit];
-      if (accel <= 0) continue;                 // not accelerated
-
-      const withoutI = mask ^ (1 << bit);       // S \ {i}
-      const forcedValue = coalitionValue[withoutI] - accel;
-
-      if (coalitionValue[mask] > forcedValue) {
-        const cName    = coalitionName(mask, players);
-        const prevVal  = coalitionValue[mask];
-        coalitionValue[mask] = forcedValue;
-        step("ACCEL ADJUST",
-          `  v(${cName}): CPM=${prevVal}, ` +
-          `forced=v(${coalitionName(withoutI, players)})-${accel}=${forcedValue} → updated to ${forcedValue}`
-        );
-      }
-    }
-  }
-
-  // ── Shapley value computation ─────────────────────────────────
-  step("SHAPLEY CALC", `Computing Shapley values for ${n} players (n! = ${factorial(n)})...`);
-  const nFactorial = factorial(n);
-  const shapleyValues = new Array(n).fill(0);
-
-  for (let i = 0; i < n; i++) {
-    const iBit = 1 << i;
-    const pName = players[i].name || players[i].id;
-    step("SHAPLEY PLAYER", `\n  ── φ(${pName}) ──`);
-
-    let runningTotal = 0;
-
-    for (let mask = 0; mask < totalCoalitions; mask++) {
-      if (mask & iBit) continue;
-
-      const sSize = popcount(mask);
-      const weight = factorial(sSize) * factorial(n - sSize - 1) / nFactorial;
-      const vWithI = coalitionValue[mask | iBit];
-      const vWithoutI = coalitionValue[mask];
-      const marginal = vWithI - vWithoutI;
-      const contribution = weight * marginal;
-      runningTotal += contribution;
-
-      const sName = coalitionName(mask, players);
-      const sUnionI = coalitionName(mask | iBit, players);
-      step("MARGINAL",
-        `    S=${sName}, S∪{${pName}}=${sUnionI}` +
-        `  |  |S|=${sSize}, weight=${sSize}!×${n - sSize - 1}!/${n}! = ${weight.toFixed(6)}` +
-        `  |  v(S∪{i})=${vWithI}, v(S)=${vWithoutI}` +
-        `  |  marginal=${marginal}` +
-        `  |  weighted=${contribution.toFixed(6)}` +
-        `  |  running total=${runningTotal.toFixed(6)}`
-      );
-    }
-
-    shapleyValues[i] = runningTotal;
-    step("SHAPLEY RESULT", `  → φ(${pName}) = ${runningTotal.toFixed(6)}`);
-  }
-
-  // ── Final summary ─────────────────────────────────────────────
-  const shapleySum = shapleyValues.reduce((sum, v) => sum + v, 0);
-  step("SHAPLEY SUM", `Sum of all Shapley values = ${shapleySum.toFixed(6)}`);
-  step("EFFICIENCY CHECK",
-    `Total delay = ${totalDelay}, Shapley sum = ${shapleySum.toFixed(6)}, ` +
-    `difference = ${Math.abs(totalDelay - shapleySum).toFixed(6)}`
-  );
-
-  // ── Build results ─────────────────────────────────────────────
-  const shapleyMap = new Map();
-  for (let i = 0; i < n; i++) {
-    shapleyMap.set(players[i].id, shapleyValues[i]);
-  }
-
-  const results = tasks.map(t => {
-    const sv = shapleyMap.get(t.id) || 0;
-    return {
-      id: t.id, name: t.name,
-      planned: t.plannedDuration, actual: t.actualDuration,
-      deviation: t.actualDuration - t.plannedDuration,
-      shapleyValue: sv,
-      responsibilityPct: totalDelay !== 0 ? (sv / totalDelay) * 100 : 0
-    };
-  });
-
-  step("DONE", "Analysis complete.");
-
-  return {
-    results,
-    totalDelay,
-    shapleySum,
-    plannedDuration: plannedProjectDuration,
-    actualDuration: actualProjectDuration,
-    debugLog: log
-  };
-}
-
-// ── Pretty-print the debug log to console ──────────────────────────
+// ── Shapley Debug Log Printer 
 function printShapleyDebugLog(debugLog) {
-  if (!debugLog || debugLog.length === 0) {
-    console.log("No debug log available.");
-    return;
+  if (!debugLog) return;
+  const { n, numCoalitions, baseline, fullValue, detailKept, coalitions, perTask } = debugLog;
+
+  console.group(`Shapley Value Analysis — ${n} tasks, ${numCoalitions} coalitions`);
+  console.log(`Baseline v(∅) [all planned]:        ${baseline}`);
+  console.log(`Full coalition v(N) [all actual]:   ${fullValue}`);
+  console.log(`Total deviation v(N) − v(∅):         ${fullValue - baseline}`);
+
+  if (detailKept && coalitions) {
+    console.group("All coalitions S and their value v(S)");
+    console.table(coalitions.map(c => ({
+      coalition: c.members.length ? c.members.join(", ") : "∅",
+      "v(S)": c.value,
+      "Δ from baseline": round(c.deltaFromBaseline)
+    })));
+    console.groupEnd();
+  } else {
+    console.log(
+      `(Per-coalition trace skipped: ${numCoalitions} coalitions is too many to log in detail. ` +
+      `Shapley values below are still exact.)`
+    );
   }
-  console.log("\n╔══════════════════════════════════════════════════════════╗");
-  console.log("║       SHAPLEY VALUE COMPUTATION — DEBUG TRACE           ║");
-  console.log("╚══════════════════════════════════════════════════════════╝\n");
-  debugLog.forEach(entry => {
-    const tag = `[${entry.step}]`.padEnd(20);
-    console.log(`${tag} ${entry.detail}`);
+
+  perTask.forEach(p => {
+    console.group(`Task "${p.taskName}" — Shapley value: ${round(p.shapleyValue)}`);
+    if (detailKept && p.marginalContributions) {
+      console.table(p.marginalContributions.map(m => ({
+        "coalition before (S)": m.coalitionBefore.length ? m.coalitionBefore.join(", ") : "∅",
+        "v(S)": m.valueWithout,
+        "v(S ∪ {i})": m.valueWith,
+        "marginal": round(m.marginal),
+        "weight": round(m.weight),
+        "weighted contribution": round(m.weightedContribution)
+      })));
+    } else {
+      console.log(`Computed from ${1 << (n - 1)} coalitions (detail not logged for performance).`);
+    }
+    console.groupEnd();
   });
-  console.log("\n════════════════════════════════════════════════════════════\n");
+
+  console.groupEnd();
 }

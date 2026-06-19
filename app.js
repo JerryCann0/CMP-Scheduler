@@ -94,6 +94,39 @@ function setActual(id, value) {
   render();
 }
 
+// ── Topological Sort (cycle check helper) ──────────────────────────
+// Returns an array of task ids in dependency order, or null if the
+// predecessor graph contains a cycle.
+function topologicalSort(taskList) {
+  const ids = taskList.map(t => t.id);
+  const idSet = new Set(ids);
+
+  const inDeg = {};
+  ids.forEach(id => { inDeg[id] = 0; });
+  taskList.forEach(t => {
+    t.predecessors.forEach(pid => {
+      if (idSet.has(pid)) inDeg[t.id]++;
+    });
+  });
+
+  const queue = [];
+  ids.forEach(id => { if (inDeg[id] === 0) queue.push(id); });
+
+  const sorted = [];
+  while (queue.length) {
+    const id = queue.shift();
+    sorted.push(id);
+    taskList.forEach(t => {
+      if (t.predecessors.includes(id)) {
+        inDeg[t.id]--;
+        if (inDeg[t.id] === 0) queue.push(t.id);
+      }
+    });
+  }
+
+  return sorted.length === taskList.length ? sorted : null;
+}
+
 // ── CPM Forward & Backward Pass ────────────────────────────────────
 function computeCPM() {
   // Build lookup
@@ -914,6 +947,7 @@ function renderGantt(cpm) {
 
 // ── Analysis Rendering ─────────────────────────────────────────────
 function renderAnalysis(plannedProjectDuration) {
+  const start_time = Date.now();
   analysisResults.innerHTML = "";
 
   const result = computeShapleyValuesDebug(tasks, plannedProjectDuration);
@@ -995,6 +1029,7 @@ function renderAnalysis(plannedProjectDuration) {
 
   table.appendChild(tbody);
   analysisResults.appendChild(table);
+  console.log("Analysis completed in", Date.now() - start_time, "ms");
 }
 
 // ── Round helper ───────────────────────────────────────────────────
