@@ -96,7 +96,7 @@ function computeShapleyValues(tasks, plannedProjectDuration) {
   }
 
   // Identify deviated tasks (players)
-  const players = tasks.filter(t => t.actualDuration !== t.plannedDuration);
+  const players = tasks; // All tasks are treated as players for Shapley analysis
 
   // Compute actual project duration (all deviations applied)
   const allOverrides = new Map();
@@ -148,33 +148,43 @@ function computeShapleyValues(tasks, plannedProjectDuration) {
     coalitionValue[mask] = projDur - plannedProjectDuration;
   }
 
-  // ── Apply acceleration adjustment to solo coalitions ──────────
-  // For accelerated tasks (actual < planned), the solo coalition
-  // should always reflect the acceleration: subtract the acceleration
-  // amount from the project duration, even if the task is non-critical
-  // and the CPM forward pass shows no change.
+  // ── Apply acceleration adjustment to ALL coalitions containing
+  //    an accelerated player ────────────────────────────────────
   //
-  // Example: project = 10, task accelerated by 1 on a non-critical
-  // path → CPM says v({i}) = 0, but we override to:
-  //   v({i}) = (projDur - accelerationAmount) - planned = 10 - 1 - 10 = -1
+  // For accelerated tasks (actual < planned), the CPM forward pass
+  // may show no change if the task is on a non-critical path.  The
+  // intended rule is that the project duration is ALWAYS reduced by
+  // the full acceleration amount whenever an accelerated player is
+  // included in a coalition.
   //
-  // For tasks that are on the critical path, the CPM already captures
-  // some reduction; we ensure the full acceleration is reflected by
-  // taking the minimum of the CPM result and the forced reduction.
+  // We iterate coalitions in ascending mask order (fewest members
+  // first).  For every coalition S that contains accelerated player i
+  // we enforce:
+  //
+  //   v(S) ≤ v(S \ {i}) - acceleration
+  //
+  // i.e. adding i to any existing coalition must reduce the coalition
+  // value by at least the acceleration.  Taking the minimum respects
+  // cases where the CPM already shows a larger reduction.
+  //
+  // Processing in ascending mask order guarantees that when we adjust
+  // v(S), the value v(S \ {i}) has already been adjusted (or was
+  // never changed because it contains no accelerated players).
 
-  for (let bit = 0; bit < n; bit++) {
-    const player = players[bit];
-    const acceleration = player.plannedDuration - player.actualDuration;
-    if (acceleration > 0) {
-      // Task was accelerated
-      const soloMask = 1 << bit;
-      // Force the solo coalition to reflect the full acceleration:
-      // project duration is reduced by the acceleration amount.
-      const forcedValue = -acceleration;
-      // Take the minimum (most negative) to ensure the acceleration
-      // is at least as large as the forced value, but also respect
-      // the CPM result if it already shows a larger reduction.
-      coalitionValue[soloMask] = Math.min(coalitionValue[soloMask], forcedValue);
+  // Collect accelerated players once
+  const accelerations = players.map(p => p.plannedDuration - p.actualDuration);
+
+  for (let mask = 1; mask < totalCoalitions; mask++) {
+    for (let bit = 0; bit < n; bit++) {
+      if (!(mask & (1 << bit))) continue;          // player i not in S
+      const accel = accelerations[bit];
+      if (accel <= 0) continue;                    // not accelerated
+
+      const withoutI = mask ^ (1 << bit);          // S \ {i}
+      const forcedValue = coalitionValue[withoutI] - accel;
+      if (coalitionValue[mask] > forcedValue) {
+        coalitionValue[mask] = forcedValue;
+      }
     }
   }
 
@@ -327,28 +337,35 @@ function computeShapleyValuesDebug(tasks, plannedProjectDuration) {
   }
 
   // ── Acceleration adjustment ───────────────────────────────────
-  step("ACCELERATION ADJ", "Checking solo coalitions for acceleration adjustments...");
-  for (let bit = 0; bit < n; bit++) {
-    const player = players[bit];
-    const acceleration = player.plannedDuration - player.actualDuration;
-    const soloMask = 1 << bit;
-    const cName = coalitionName(soloMask, players);
-    const originalValue = coalitionValue[soloMask];
+  // For accelerated tasks, ensure every coalition that contains an
+  // accelerated player reflects the full acceleration.  We process
+  // masks in ascending order so v(S \ {i}) is always settled before
+  // we use it to compute the forced value for v(S).
+  step("ACCELERATION ADJ",
+    "Applying acceleration adjustments to ALL coalitions containing " +
+    "accelerated players (ascending mask order)..."
+  );
 
-    if (acceleration > 0) {
-      const forcedValue = -acceleration;
-      const newValue = Math.min(originalValue, forcedValue);
-      coalitionValue[soloMask] = newValue;
-      step("ACCEL ADJUST",
-        `  "${player.name || player.id}" accelerated by ${acceleration}. ` +
-        `Solo v(${cName}): CPM=${originalValue}, forced=${forcedValue} → ` +
-        `min(${originalValue}, ${forcedValue}) = ${newValue}`
-      );
-    } else {
-      step("ACCEL ADJUST",
-        `  "${player.name || player.id}" not accelerated (accel=${acceleration}). ` +
-        `Solo v(${cName}) = ${originalValue} (unchanged)`
-      );
+  const accelerations = players.map(p => p.plannedDuration - p.actualDuration);
+
+  for (let mask = 1; mask < totalCoalitions; mask++) {
+    for (let bit = 0; bit < n; bit++) {
+      if (!(mask & (1 << bit))) continue;       // player i not in coalition
+      const accel = accelerations[bit];
+      if (accel <= 0) continue;                 // not accelerated
+
+      const withoutI = mask ^ (1 << bit);       // S \ {i}
+      const forcedValue = coalitionValue[withoutI] - accel;
+
+      if (coalitionValue[mask] > forcedValue) {
+        const cName    = coalitionName(mask, players);
+        const prevVal  = coalitionValue[mask];
+        coalitionValue[mask] = forcedValue;
+        step("ACCEL ADJUST",
+          `  v(${cName}): CPM=${prevVal}, ` +
+          `forced=v(${coalitionName(withoutI, players)})-${accel}=${forcedValue} → updated to ${forcedValue}`
+        );
+      }
     }
   }
 

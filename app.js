@@ -58,13 +58,15 @@ addBtn.addEventListener("click", () => {
     preds.push(parseInt(cb.value, 10));
   });
 
-  tasks.push({
+  const newTask = {
     id: nextId++,
     name,
     plannedDuration: dur,
     actualDuration: null,
     predecessors: preds
-  });
+  };
+  tasks.push(newTask);
+  ganttOrder.push(newTask.id);
 
   taskNameInput.value = "";
   plannedDurInput.value = "";
@@ -79,6 +81,7 @@ function deleteTask(id) {
     t.predecessors = t.predecessors.filter(pid => pid !== id);
   });
   tasks = tasks.filter(t => t.id !== id);
+  ganttOrder = ganttOrder.filter(pid => pid !== id);
   render();
 }
 
@@ -574,6 +577,7 @@ importFile.addEventListener("change", () => {
     // The exported format stores predecessors as [{id, name}];
     // we remap them by name so IDs are stable even if the file was hand-edited.
     tasks = [];
+    ganttOrder = [];
     nextId = 1;
 
     // First pass: create tasks without predecessors
@@ -590,6 +594,7 @@ importFile.addEventListener("change", () => {
           : null,
         predecessors: [] // filled in second pass
       });
+      ganttOrder.push(newId);
     });
 
     // Second pass: resolve predecessors
@@ -614,6 +619,33 @@ importFile.addEventListener("change", () => {
   reader.readAsText(file);
 });
 
+// ── Gantt Drag & Drop Functions ────────────────────────────────────
+let ganttDragSrcIndex = null;
+
+function handleGanttDragStart(e, index) {
+  ganttDragSrcIndex = index;
+  e.dataTransfer.effectAllowed = "move";
+  e.target.classList.add("dragging");
+}
+
+function handleGanttDrop(e, targetIndex) {
+  if (ganttDragSrcIndex === null || ganttDragSrcIndex === targetIndex) return;
+
+  // Reorder in ganttOrder array
+  const draggedId = ganttOrder.splice(ganttDragSrcIndex, 1)[0];
+  ganttOrder.splice(targetIndex, 0, draggedId);
+
+  render();
+}
+
+function handleGanttDragEnd(e) {
+  const draggingRow = document.querySelector(".gantt-row.dragging");
+  if (draggingRow) {
+    draggingRow.classList.remove("dragging");
+  }
+  ganttDragSrcIndex = null;
+}
+
 // ── Gantt Chart Rendering ──────────────────────────────────────────
 function renderGantt(cpm) {
   ganttContainer.innerHTML = "";
@@ -626,6 +658,18 @@ function renderGantt(cpm) {
     ganttContainer.appendChild(msg);
     return;
   }
+
+  // Synchronize ganttOrder with tasks
+  const taskIds = tasks.map(t => t.id);
+  ganttOrder = ganttOrder.filter(id => taskIds.includes(id));
+  taskIds.forEach(id => {
+    if (!ganttOrder.includes(id)) {
+      ganttOrder.push(id);
+    }
+  });
+
+  // Sort nodes by ganttOrder
+  const ganttNodes = ganttOrder.map(id => cpm.nodes.find(n => n.id === id)).filter(Boolean);
 
   const CELL_W = 28; // px per time unit
   const ROW_H = 22;  // px per row (matches CSS .gantt-row height)
@@ -694,22 +738,22 @@ function renderGantt(cpm) {
   header.appendChild(timeHeaders);
   wrapper.appendChild(header);
 
-  // Build a map of node id → row index for arrow positioning
+  // Build a map of node id → row index for arrow positioning (using Gantt row index)
   const rowIndex = {};
-  cpm.nodes.forEach((node, idx) => { rowIndex[node.id] = idx; });
+  ganttNodes.forEach((node, idx) => { rowIndex[node.id] = idx; });
 
   // Build rows
-  cpm.nodes.forEach((node, index) => {
+  ganttNodes.forEach((node, index) => {
     const row = document.createElement("div");
     row.className = "gantt-row";
     row.draggable = true;
 
     row.addEventListener("dragstart", (e) => {
-      handleDragStart(e, index);
+      handleGanttDragStart(e, index);
     });
     row.addEventListener("dragover", handleDragOver);
-    row.addEventListener("drop", (e) => handleDrop(e, index));
-    row.addEventListener("dragend", handleDragEnd);
+    row.addEventListener("drop", (e) => handleGanttDrop(e, index));
+    row.addEventListener("dragend", handleGanttDragEnd);
 
     const label = document.createElement("div");
     label.className = "gantt-row-label";
@@ -755,7 +799,7 @@ function renderGantt(cpm) {
   // SVG overlay for dependency arrows
   if (showRelations && (showPlanned || (showActual && allHaveActual))) {
     const totalW = LABEL_W + maxTime * CELL_W;
-    const totalH = HEADER_H + cpm.nodes.length * ROW_H;
+    const totalH = HEADER_H + ganttNodes.length * ROW_H;
 
     const svgNS = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(svgNS, "svg");
@@ -821,10 +865,10 @@ function renderGantt(cpm) {
 
     // Draw planned arrows
     if (showPlanned) {
-      cpm.nodes.forEach(node => {
+      ganttNodes.forEach(node => {
         node.predecessors.forEach(pid => {
           if (rowIndex[pid] === undefined) return;
-          const predNode = cpm.nodes.find(n => n.id === pid);
+          const predNode = ganttNodes.find(n => n.id === pid);
           if (!predNode) return;
 
           const predRow = rowIndex[pid];
@@ -842,7 +886,7 @@ function renderGantt(cpm) {
 
     // Draw actual arrows
     if (showActual && allHaveActual) {
-      cpm.nodes.forEach(node => {
+      ganttNodes.forEach(node => {
         node.predecessors.forEach(pid => {
           if (rowIndex[pid] === undefined) return;
           const predNode = actualMap[pid];
